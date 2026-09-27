@@ -2,6 +2,7 @@
 <html lang="es">
 
 <head>
+
   <meta charset="UTF-8">
 
   <title>Image Ripper</title>
@@ -12,105 +13,206 @@
       box-sizing: border-box;
     }
 
+
     body {
+
       margin: 0;
+
       width: 420px;
+
       min-height: 500px;
+
       background: #111;
+
       color: #eee;
+
       font-family: Arial, sans-serif;
     }
 
+
     header {
+
       position: sticky;
+
       top: 0;
+
       z-index: 10;
+
       background: #181818;
+
       padding: 14px;
+
       border-bottom: 1px solid #333;
     }
 
+
     h1 {
-      margin: 0 0 10px;
+
+      margin: 0 0 8px;
+
       font-size: 20px;
     }
 
+
     .rule {
+
       font-size: 12px;
+
       color: #aaa;
+
       margin-bottom: 10px;
+
+      line-height: 1.4;
     }
 
+
     button {
+
       width: 100%;
+
       padding: 11px;
+
       margin-top: 7px;
+
       border: 0;
+
       border-radius: 6px;
+
       background: #8b0000;
+
       color: white;
+
       font-weight: bold;
+
       cursor: pointer;
     }
 
+
     button:hover {
+
       background: #b00000;
     }
 
+
+    button:disabled {
+
+      opacity: 0.5;
+
+      cursor: not-allowed;
+    }
+
+
+    #stop {
+
+      display: none;
+
+      background: #555;
+    }
+
+
     #status {
+
       margin-top: 9px;
+
       font-size: 12px;
-      color: #aaa;
+
+      color: #ddd;
+
+      line-height: 1.4;
     }
 
-    #results {
-      padding: 10px;
-    }
 
-    .image-group {
-      margin-bottom: 12px;
-      padding: 10px;
-      background: #1b1b1b;
-      border: 1px solid #333;
-      border-radius: 7px;
-    }
+    #progress {
 
-    .image-title {
+      margin-top: 5px;
+
+      font-size: 13px;
+
       font-weight: bold;
-      margin-bottom: 8px;
+
       color: #fff;
     }
 
+
+    #results {
+
+      padding: 10px;
+    }
+
+
+    .image-group {
+
+      margin-bottom: 12px;
+
+      padding: 10px;
+
+      background: #1b1b1b;
+
+      border: 1px solid #333;
+
+      border-radius: 7px;
+    }
+
+
+    .image-title {
+
+      font-weight: bold;
+
+      margin-bottom: 8px;
+
+      color: #fff;
+    }
+
+
     .version {
+
       display: flex;
+
       gap: 9px;
+
       align-items: flex-start;
+
       padding: 8px;
+
       margin-top: 5px;
+
       background: #242424;
+
       border-radius: 5px;
+
       cursor: pointer;
     }
 
+
     .version:hover {
+
       background: #303030;
     }
 
+
     .version input {
+
       margin-top: 3px;
     }
 
+
     .version strong {
+
       font-size: 13px;
     }
 
+
     .version small {
+
       color: #aaa;
+
       font-size: 11px;
     }
 
   </style>
+
 </head>
+
 
 <body>
 
@@ -118,25 +220,47 @@
 
     <h1>IMAGE RIPPER</h1>
 
+
     <div class="rule">
-      Solo imágenes con ancho o alto de 900 px o más.
+
+      Escaneo completo de la página.<br>
+
+      Se incluyen imágenes con
+      <strong>900 px o más</strong>
+      en cualquiera de sus lados.
+
     </div>
 
+
     <button id="scan">
-      ESCANEAR IMÁGENES
+      ESCANEAR TODA LA PÁGINA
     </button>
+
+
+    <button id="stop">
+      DETENER ESCANEO
+    </button>
+
 
     <button id="download">
       DESCARGAR SELECCIONADAS
     </button>
 
+
     <div id="status">
-      Listo.
+      Listo para escanear.
+    </div>
+
+
+    <div id="progress">
+      0 imágenes encontradas
     </div>
 
   </header>
 
+
   <main id="results"></main>
+
 
   <script src="popup.js"></script>
 
