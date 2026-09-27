@@ -1,18 +1,22 @@
 {
-  "manifest_version": 3,
-  "name": "Image Ripper",
-  "version": "1.0.0",
-  "description": "Detecta y descarga imágenes de la página actual.",
-  "permissions": [
-    "downloads",
-    "activeTab",
-    "scripting"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
-  "action": {
-    "default_title": "Image Ripper",
-    "default_popup": "popup.html"
-  }
+"manifest_version": 3,
+"name": "Image Ripper",
+"version": "3.0.0",
+"description": "Detecta, localiza y descarga imágenes originales de páginas web.",
+"permissions": [
+"downloads",
+"activeTab",
+"scripting",
+"tabs"
+],
+"host_permissions": [
+"<all_urls>"
+],
+"background": {
+"service_worker": "background.js"
+},
+"action": {
+"default_title": "Image Ripper",
+"default_popup": "popup.html"
+}
 }
