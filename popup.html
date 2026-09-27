@@ -1,218 +1,164 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
-
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <title>Image Ripper</title>
 
   <style>
-
     * {
       box-sizing: border-box;
     }
 
-
     body {
-
       margin: 0;
-
       width: 420px;
-
       min-height: 500px;
-
-      background: #111;
-
-      color: #eee;
-
-      font-family: Arial, sans-serif;
+      background: #111111;
+      color: #eeeeee;
+      font-family: Arial, Helvetica, sans-serif;
     }
-
 
     header {
-
       position: sticky;
-
       top: 0;
-
-      z-index: 10;
-
-      background: #181818;
-
+      z-index: 100;
       padding: 14px;
-
-      border-bottom: 1px solid #333;
+      background: #181818;
+      border-bottom: 1px solid #333333;
     }
-
 
     h1 {
-
-      margin: 0 0 8px;
-
-      font-size: 20px;
+      margin: 0 0 8px 0;
+      font-size: 21px;
+      letter-spacing: 1px;
     }
-
 
     .rule {
-
-      font-size: 12px;
-
-      color: #aaa;
-
       margin-bottom: 10px;
-
-      line-height: 1.4;
+      color: #aaaaaa;
+      font-size: 12px;
+      line-height: 1.45;
     }
 
+    .rule strong {
+      color: #eeeeee;
+    }
 
     button {
-
       width: 100%;
-
-      padding: 11px;
-
+      min-height: 42px;
       margin-top: 7px;
-
+      padding: 10px 12px;
       border: 0;
-
       border-radius: 6px;
-
       background: #8b0000;
-
-      color: white;
-
+      color: #ffffff;
+      font-size: 13px;
       font-weight: bold;
-
       cursor: pointer;
     }
 
-
     button:hover {
-
       background: #b00000;
     }
 
-
     button:disabled {
-
       opacity: 0.5;
-
       cursor: not-allowed;
     }
 
-
     #stop {
-
       display: none;
-
-      background: #555;
+      background: #555555;
     }
 
+    #stop:hover {
+      background: #666666;
+    }
 
     #status {
-
-      margin-top: 9px;
-
+      margin-top: 10px;
+      color: #dddddd;
       font-size: 12px;
-
-      color: #ddd;
-
       line-height: 1.4;
     }
 
-
     #progress {
-
       margin-top: 5px;
-
+      color: #ffffff;
       font-size: 13px;
-
       font-weight: bold;
-
-      color: #fff;
+      line-height: 1.4;
     }
-
 
     #results {
-
       padding: 10px;
     }
 
-
     .image-group {
-
       margin-bottom: 12px;
-
       padding: 10px;
-
       background: #1b1b1b;
-
-      border: 1px solid #333;
-
+      border: 1px solid #333333;
       border-radius: 7px;
     }
 
-
     .image-title {
-
-      font-weight: bold;
-
       margin-bottom: 8px;
-
-      color: #fff;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: bold;
     }
 
-
     .version {
-
       display: flex;
-
-      gap: 9px;
-
       align-items: flex-start;
-
-      padding: 8px;
-
+      gap: 9px;
       margin-top: 5px;
-
+      padding: 9px;
       background: #242424;
-
       border-radius: 5px;
-
       cursor: pointer;
     }
 
-
     .version:hover {
-
       background: #303030;
     }
 
-
     .version input {
-
-      margin-top: 3px;
+      flex: 0 0 auto;
+      width: 16px;
+      height: 16px;
+      margin: 2px 0 0 0;
+      cursor: pointer;
     }
 
+    .version span {
+      min-width: 0;
+      line-height: 1.35;
+    }
 
     .version strong {
-
+      color: #ffffff;
       font-size: 13px;
     }
 
-
     .version small {
-
-      color: #aaa;
-
+      color: #aaaaaa;
       font-size: 11px;
+      word-break: break-word;
     }
 
+    .empty {
+      padding: 20px 10px;
+      color: #888888;
+      text-align: center;
+      font-size: 12px;
+    }
   </style>
-
 </head>
-
 
 <body>
 
@@ -220,50 +166,42 @@
 
     <h1>IMAGE RIPPER</h1>
 
-
     <div class="rule">
-
       Escaneo completo de la página.<br>
-
       Se incluyen imágenes con
       <strong>900 px o más</strong>
       en cualquiera de sus lados.
-
     </div>
 
-
-    <button id="scan">
+    <button id="scan" type="button">
       ESCANEAR TODA LA PÁGINA
     </button>
 
-
-    <button id="stop">
+    <button id="stop" type="button">
       DETENER ESCANEO
     </button>
 
-
-    <button id="download">
+    <button id="download" type="button">
       DESCARGAR SELECCIONADAS
     </button>
-
 
     <div id="status">
       Listo para escanear.
     </div>
 
-
     <div id="progress">
-      0 imágenes encontradas
+      0 imágenes encontradas · 0 seleccionadas
     </div>
 
   </header>
 
-
-  <main id="results"></main>
-
+  <main id="results">
+    <div class="empty">
+      Pulsa "ESCANEAR TODA LA PÁGINA" para comenzar.
+    </div>
+  </main>
 
   <script src="popup.js"></script>
 
 </body>
-
 </html>
