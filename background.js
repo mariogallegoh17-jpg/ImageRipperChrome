@@ -1,701 +1,249 @@
-const IMAGE_EXTENSIONS = [
-".jpg",
-".jpeg",
-".png",
-".webp",
-".gif",
-".bmp",
-".avif",
-".tif",
-".tiff"
-];
+const MIN_SIZE = 900;
 
-function isImageFile(url) {
-if (!url) return false;
-
-try {
-const pathname =
-new URL(url).pathname.toLowerCase();
-
-return IMAGE_EXTENSIONS.some(ext =>
-  pathname.endsWith(ext)
-);
-
-} catch {
-return false;
-}
+function validSize(width, height) {
+  return (width >= MIN_SIZE || height >= MIN_SIZE);
 }
 
-function normalizeUrl(url, baseUrl) {
-if (!url) return null;
+function uniqueVersions(versions) {
+  const seen = new Set();
 
-try {
-const result = new URL(url, baseUrl).href;
+  return versions.filter(v => {
+    if (!v.url) return false;
 
-if (
-  result.startsWith("http://") ||
-  result.startsWith("https://")
-) {
-  return result;
-}
+    const key = v.url.split("#")[0];
 
-return null;
+    if (seen.has(key)) return false;
 
-} catch {
-return null;
-}
-}
-
-function uniqueVersions(list) {
-const map = new Map();
-
-for (const item of list) {
-if (!item || !item.url) continue;
-
-const existing = map.get(item.url);
-
-if (!existing) {
-  map.set(item.url, item);
-  continue;
-}
-
-if (
-  (item.width || 0) * (item.height || 0) >
-  (existing.width || 0) * (existing.height || 0)
-) {
-  map.set(item.url, item);
-}
-
-}
-
-return [...map.values()];
-}
-
-function collectImagesFromDocument(document, baseUrl) {
-const results = [];
-
-function add(url, source, width = 0, height = 0) {
-const absolute = normalizeUrl(url, baseUrl);
-
-if (!absolute) return;
-
-results.push({
-  url: absolute,
-  source,
-  width: Number(width) || 0,
-  height: Number(height) || 0
-});
-
-}
-
-/*
-
-* META / Open Graph
-  */
-  document.querySelectorAll(
-  'meta[property="og:image"], meta[name="twitter:image"]'
-  ).forEach(meta => {
-  add(
-  meta.getAttribute("content"),
-  "Página de destino"
-  );
+    seen.add(key);
+    return true;
   });
-
-/*
-
-* IMG
-  */
-  document.querySelectorAll("img").forEach(img => {
-
-const width =
-  img.naturalWidth ||
-  parseInt(img.getAttribute("width")) ||
-  0;
-
-const height =
-  img.naturalHeight ||
-  parseInt(img.getAttribute("height")) ||
-  0;
-
-/*
- * currentSrc / src
- */
-if (img.currentSrc) {
-  add(
-    img.currentSrc,
-    "Página de destino",
-    width,
-    height
-  );
 }
 
-if (img.src) {
-  add(
-    img.src,
-    "Página de destino",
-    width,
-    height
-  );
-}
+async function inspectTab(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
 
-/*
- * Atributos habituales de imágenes grandes.
- */
-const attributes = [
-  "data-original",
-  "data-original-src",
-  "data-full",
-  "data-full-image",
-  "data-large",
-  "data-large-image",
-  "data-image",
-  "data-src"
-];
+        const found = [];
 
-for (const attribute of attributes) {
-  const value = img.getAttribute(attribute);
-
-  if (value) {
-    add(
-      value,
-      "Imagen original indicada por la página",
-      width,
-      height
-    );
-  }
-}
-
-/*
- * SRCSET
- */
-const srcset =
-  img.getAttribute("srcset");
-
-if (srcset) {
-
-  for (const entry of srcset.split(",")) {
-
-    const parts =
-      entry.trim().split(/\s+/);
-
-    const url = parts[0];
-
-    let candidateWidth = 0;
-
-    if (
-      parts[1] &&
-      parts[1].endsWith("w")
-    ) {
-      candidateWidth =
-        parseInt(parts[1], 10) || 0;
-    }
-
-    add(
-      url,
-      "srcset",
-      candidateWidth,
-      0
-    );
-  }
-}
-
-});
-
-/*
-
-* Enlaces que apuntan directamente a imágenes.
-  */
-  document.querySelectorAll("a[href]").forEach(a => {
-
-const href =
-  a.getAttribute("href");
-
-if (!href) return;
-
-const absolute =
-  normalizeUrl(href, baseUrl);
-
-if (!absolute) return;
-
-if (isImageFile(absolute)) {
-
-  add(
-    absolute,
-    "Enlace directo",
-    0,
-    0
-  );
-}
-
-});
-
-return uniqueVersions(results);
-}
-
-/*
-
-* Analiza una pestaña después de que su contenido
-* haya terminado de cargar.
-  */
-  async function inspectTab(tabId, baseUrl) {
-
-try {
-
-const result =
-  await chrome.scripting.executeScript({
-    target: {
-      tabId
-    },
-    func: () => {
-
-      function collect() {
-
-        const images = [];
-
-        function add(
-          url,
-          source,
-          width = 0,
-          height = 0
-        ) {
+        function add(url, width = 0, height = 0, source = "") {
           if (!url) return;
 
-          images.push({
+          try {
+            url = new URL(url, location.href).href;
+          } catch {
+            return;
+          }
+
+          found.push({
             url,
-            source,
-            width:
-              Number(width) || 0,
-            height:
-              Number(height) || 0
+            width: Number(width) || 0,
+            height: Number(height) || 0,
+            source
           });
         }
 
+        // IMG reales
+        document.querySelectorAll("img").forEach(img => {
+
+          const width = img.naturalWidth || img.width || 0;
+          const height = img.naturalHeight || img.height || 0;
+
+          add(
+            img.currentSrc || img.src,
+            width,
+            height,
+            "Página de destino"
+          );
+
+          // srcset
+          if (img.srcset) {
+            const candidates = img.srcset
+              .split(",")
+              .map(x => x.trim());
+
+            candidates.forEach(candidate => {
+              const parts = candidate.split(/\s+/);
+              const url = parts[0];
+              const descriptor = parts[1] || "";
+
+              let w = 0;
+              let h = 0;
+
+              if (descriptor.endsWith("w")) {
+                w = parseInt(descriptor);
+              }
+
+              add(url, w, h, "srcset");
+            });
+          }
+
+          // atributos comunes
+          [
+            "data-original",
+            "data-original-src",
+            "data-full",
+            "data-full-image",
+            "data-large",
+            "data-large-image",
+            "data-image",
+            "data-src"
+          ].forEach(attr => {
+            const value = img.getAttribute(attr);
+
+            if (value) {
+              add(value, 0, 0, attr);
+            }
+          });
+        });
+
+        // Picture / source
+        document.querySelectorAll("source").forEach(source => {
+
+          const srcset = source.getAttribute("srcset");
+
+          if (!srcset) return;
+
+          srcset.split(",").forEach(candidate => {
+
+            const parts = candidate.trim().split(/\s+/);
+
+            const url = parts[0];
+            const descriptor = parts[1] || "";
+
+            let width = 0;
+
+            if (descriptor.endsWith("w")) {
+              width = parseInt(descriptor);
+            }
+
+            add(
+              url,
+              width,
+              0,
+              "picture/source"
+            );
+          });
+        });
+
+        // Open Graph
         document.querySelectorAll(
           'meta[property="og:image"], meta[name="twitter:image"]'
         ).forEach(meta => {
 
           add(
             meta.content,
-            "Página de destino"
+            0,
+            0,
+            "Meta de página"
           );
         });
 
-        document.querySelectorAll("img")
-          .forEach(img => {
+        // Enlaces directos a imágenes
+        document.querySelectorAll("a[href]").forEach(a => {
 
-            const width =
-              img.naturalWidth ||
-              img.width ||
-              0;
+          const href = a.href;
 
-            const height =
-              img.naturalHeight ||
-              img.height ||
-              0;
-
-            if (img.currentSrc) {
-              add(
-                img.currentSrc,
-                "Página de destino",
-                width,
-                height
-              );
-            }
-
-            if (img.src) {
-              add(
-                img.src,
-                "Página de destino",
-                width,
-                height
-              );
-            }
-
-            const attributes = [
-              "data-original",
-              "data-original-src",
-              "data-full",
-              "data-full-image",
-              "data-large",
-              "data-large-image",
-              "data-image",
-              "data-src"
-            ];
-
-            for (
-              const attribute
-              of attributes
-            ) {
-
-              const value =
-                img.getAttribute(attribute);
-
-              if (value) {
-                add(
-                  value,
-                  "Imagen original indicada por la página",
-                  width,
-                  height
-                );
-              }
-            }
-
-            const srcset =
-              img.getAttribute("srcset");
-
-            if (srcset) {
-
-              for (
-                const entry
-                of srcset.split(",")
-              ) {
-
-                const parts =
-                  entry.trim()
-                    .split(/\s+/);
-
-                let candidateWidth = 0;
-
-                if (
-                  parts[1] &&
-                  parts[1].endsWith("w")
-                ) {
-                  candidateWidth =
-                    parseInt(
-                      parts[1],
-                      10
-                    ) || 0;
-                }
-
-                add(
-                  parts[0],
-                  "srcset",
-                  candidateWidth,
-                  0
-                );
-              }
-            }
-          });
-
-        document.querySelectorAll(
-          "a[href]"
-        ).forEach(a => {
-
-          const href =
-            a.href;
-
-          if (!href) return;
-
-          const path =
-            new URL(href).pathname
-              .toLowerCase();
-
-          const extensions = [
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".webp",
-            ".gif",
-            ".bmp",
-            ".avif",
-            ".tif",
-            ".tiff"
-          ];
-
-          if (
-            extensions.some(ext =>
-              path.endsWith(ext)
-            )
-          ) {
+          if (/\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i.test(href)) {
             add(
               href,
+              0,
+              0,
               "Enlace directo"
             );
           }
         });
 
-        return images;
+        return found;
       }
+    });
 
-      return collect();
-    }
-  });
+    return results?.[0]?.result || [];
 
-return result?.[0]?.result || [];
-
-} catch (error) {
-
-console.error(
-  "No se pudo analizar la pestaña:",
-  error
-);
-
-return [];
-
-}
+  } catch (error) {
+    console.error("Error inspeccionando pestaña:", error);
+    return [];
+  }
 }
 
-/*
+async function inspectDestination(url) {
 
-* Abre el enlace en una pestaña temporal,
-* espera su carga y analiza las imágenes.
-  */
-  async function inspectDestination(url) {
-
-let tab = null;
-
-try {
-
-tab =
-  await chrome.tabs.create({
-    url,
-    active: false
-  });
-
-/*
- * Esperamos hasta que la página termine
- * de cargar.
- */
-await waitForTabLoad(tab.id);
-
-/*
- * Esperamos un poco más para que imágenes
- * dinámicas tengan oportunidad de aparecer.
- */
-await delay(1200);
-
-const images =
-  await inspectTab(
-    tab.id,
-    url
-  );
-
-return images;
-
-} catch (error) {
-
-console.error(
-  "Error inspeccionando destino:",
-  error
-);
-
-return [];
-
-} finally {
-
-if (tab?.id) {
+  let tab = null;
 
   try {
-    await chrome.tabs.remove(tab.id);
-  } catch {}
-}
 
-}
-}
+    tab = await chrome.tabs.create({
+      url,
+      active: false
+    });
 
-function waitForTabLoad(tabId) {
+    await new Promise(resolve => {
 
-return new Promise(resolve => {
+      const listener = (tabId, info) => {
 
-let finished = false;
+        if (
+          tabId === tab.id &&
+          info.status === "complete"
+        ) {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
 
-function done() {
+      chrome.tabs.onUpdated.addListener(listener);
 
-  if (finished) return;
+      setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }, 10000);
+    });
 
-  finished = true;
+    // Dar tiempo para contenido dinámico
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
-  chrome.tabs.onUpdated.removeListener(
-    listener
-  );
+    const versions = await inspectTab(tab.id);
 
-  resolve();
-}
+    return versions;
 
-function listener(
-  updatedTabId,
-  changeInfo
-) {
+  } catch (error) {
 
-  if (
-    updatedTabId === tabId &&
-    changeInfo.status === "complete"
-  ) {
-    done();
+    console.error("Error abriendo destino:", error);
+
+    return [];
+
+  } finally {
+
+    if (tab?.id) {
+      try {
+        await chrome.tabs.remove(tab.id);
+      } catch {}
+    }
   }
 }
 
-chrome.tabs.onUpdated.addListener(
-  listener
-);
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
-setTimeout(
-  done,
-  15000
-);
+  if (message.action === "inspectDestination") {
 
-});
-}
+    inspectDestination(message.url)
+      .then(versions => {
 
-function delay(ms) {
-return new Promise(resolve =>
-setTimeout(resolve, ms)
-);
-}
+        sendResponse({
+          success: true,
+          versions
+        });
 
-/*
+      })
+      .catch(error => {
 
-* Recibe una lista de imágenes detectadas
-* en la página principal y busca versiones
-* adicionales en sus enlaces.
-  */
-  async function findVersions(images) {
+        sendResponse({
+          success: false,
+          error: error.message
+        });
 
-const finalResults = [];
+      });
 
-for (let i = 0; i < images.length; i++) {
-
-const image =
-  images[i];
-
-const versions = [];
-
-/*
- * Mantener SIEMPRE la imagen original
- * encontrada en la página.
- */
-versions.push({
-  url: image.url,
-  source: "Página actual",
-  width: image.width || 0,
-  height: image.height || 0
-});
-
-/*
- * Si tiene un enlace asociado y es diferente
- * a la propia imagen, analizarlo.
- */
-if (
-  image.link &&
-  image.link !== image.url
-) {
-
-  const destinationImages =
-    await inspectDestination(
-      image.link
-    );
-
-  for (
-    const destination
-    of destinationImages
-  ) {
-
-    versions.push({
-      url: destination.url,
-      source:
-        destination.source ||
-        "Enlace asociado",
-      width:
-        destination.width || 0,
-      height:
-        destination.height || 0
-    });
+    return true;
   }
-}
-
-finalResults.push({
-  index: i,
-  versions: uniqueVersions(versions)
 });
-
-}
-
-return finalResults;
-}
-
-chrome.runtime.onMessage.addListener(
-(message, sender, sendResponse) => {
-
-if (
-  message?.type ===
-  "FIND_VERSIONS"
-) {
-
-  findVersions(
-    message.images || []
-  )
-  .then(result => {
-    sendResponse({
-      success: true,
-      results: result
-    });
-  })
-  .catch(error => {
-
-    console.error(error);
-
-    sendResponse({
-      success: false,
-      error: error.message
-    });
-  });
-
-  return true;
-}
-
-if (
-  message?.type ===
-  "DOWNLOAD_SELECTED"
-) {
-
-  downloadSelected(
-    message.items || []
-  )
-  .then(result => {
-    sendResponse(result);
-  });
-
-  return true;
-}
-
-}
-);
-
-async function downloadSelected(items) {
-
-let downloaded = 0;
-let failed = 0;
-
-for (const item of items) {
-
-try {
-
-  await chrome.downloads.download({
-    url: item.url,
-    saveAs: false,
-    conflictAction: "uniquify"
-  });
-
-  downloaded++;
-
-  await delay(150);
-
-} catch (error) {
-
-  console.error(
-    "Error descargando:",
-    item.url,
-    error
-  );
-
-  failed++;
-}
-
-}
-
-return {
-success: true,
-downloaded,
-failed
-};
-}
