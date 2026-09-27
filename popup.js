@@ -1,541 +1,627 @@
 const MIN_SIZE = 900;
 
-let scanning = false;
-let results = [];
-let selectedCount = 0;
+const scanBtn =
+  document.getElementById("scan");
 
-const scanBtn = document.getElementById("scan");
-const stopBtn = document.getElementById("stop");
-const downloadBtn = document.getElementById("download");
-const statusEl = document.getElementById("status");
-const progressEl = document.getElementById("progress");
-const resultsEl = document.getElementById("results");
+const stopBtn =
+  document.getElementById("stop");
 
-function validSize(width, height) {
-  return width >= MIN_SIZE || height >= MIN_SIZE;
+const downloadBtn =
+  document.getElementById("download");
+
+const statusEl =
+  document.getElementById("status");
+
+const progressEl =
+  document.getElementById("progress");
+
+const resultsEl =
+  document.getElementById("results");
+
+let state = {
+  scanning: false,
+  groups: [],
+  totalDetected: 0,
+  validDetected: 0
+};
+
+function setStatus(text) {
+  if (statusEl) {
+    statusEl.textContent = text;
+  }
 }
 
-function updateProgress(text) {
-  if (progressEl) progressEl.textContent = text;
-}
-
-function updateStatus(text) {
-  if (statusEl) statusEl.textContent = text;
+function setProgress(text) {
+  if (progressEl) {
+    progressEl.textContent = text;
+  }
 }
 
 function updateCounter() {
-  const total = results.length;
-  selectedCount = results.filter(x => x.selected).length;
 
-  updateProgress(
-    `${total} imágenes encontradas · ${selectedCount} seleccionadas`
+  const groups =
+    state.groups || [];
+
+  let selected = 0;
+
+  for (const group of groups) {
+
+    if (group.selectedUrl) {
+      selected++;
+    }
+  }
+
+  setProgress(
+    `${groups.length} imágenes encontradas · ${selected} seleccionadas`
   );
 }
 
-async function getActiveTab() {
-  const tabs = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
+function updateButtons() {
 
-  if (!tabs.length) {
-    throw new Error("No se encontró la pestaña activa.");
+  if (scanBtn) {
+    scanBtn.disabled =
+      state.scanning;
   }
 
-  return tabs[0];
-}
-
-/*
-  ESTA FUNCIÓN HACE TODO EL ESCANEO DENTRO DE LA PÁGINA.
-
-  Esto es importante:
-  el popup ya no intenta controlar cada paso del scroll.
-  La página se encarga de desplazarse, esperar la carga lazy,
-  detectar imágenes y acumularlas.
-*/
-async function scanPage(tabId) {
-  return await chrome.scripting.executeScript({
-    target: { tabId },
-
-    func: async () => {
-      const MIN_SIZE = 900;
-
-      const found = new Map();
-
-      function validSize(w, h) {
-        return w >= MIN_SIZE || h >= MIN_SIZE;
-      }
-
-      function addImage(img) {
-        if (!img) return;
-
-        const url = img.currentSrc || img.src;
-
-        if (!url || url.startsWith("data:")) return;
-
-        const width =
-          img.naturalWidth ||
-          img.width ||
-          0;
-
-        const height =
-          img.naturalHeight ||
-          img.height ||
-          0;
-
-        const anchor = img.closest("a");
-        const link = anchor?.href || "";
-
-        const key = `${url}|${link}`;
-
-        if (!found.has(key)) {
-          found.set(key, {
-            url,
-            link,
-            width,
-            height
-          });
-        } else {
-          const old = found.get(key);
-
-          if (width > old.width || height > old.height) {
-            old.width = Math.max(old.width, width);
-            old.height = Math.max(old.height, height);
-          }
-        }
-      }
-
-      function collect() {
-        document.querySelectorAll("img").forEach(addImage);
-
-        /*
-          También revisamos imágenes que estén apareciendo
-          dentro de picture/source.
-        */
-        document.querySelectorAll("picture source").forEach(source => {
-          const srcset = source.srcset;
-
-          if (!srcset) return;
-
-          const entries = srcset.split(",");
-
-          entries.forEach(entry => {
-            const parts = entry.trim().split(/\s+/);
-            const url = parts[0];
-
-            if (!url) return;
-
-            try {
-              const absolute = new URL(url, location.href).href;
-
-              const key = `${absolute}|`;
-
-              if (!found.has(key)) {
-                found.set(key, {
-                  url: absolute,
-                  link: "",
-                  width: 0,
-                  height: 0
-                });
-              }
-            } catch (_) {}
-          });
-        });
-      }
-
-      const originalScroll = window.scrollY;
-
-      collect();
-
-      let lastHeight = 0;
-      let stableBottomRounds = 0;
-
-      /*
-        Recorremos TODA la página.
-
-        Cada paso:
-        1. hacemos scroll
-        2. esperamos
-        3. dejamos que carguen las imágenes
-        4. volvemos a recogerlas
-      */
-
-      for (let i = 0; i < 300; i++) {
-        if (window.__IMAGE_RIPPER_STOP__) {
-          break;
-        }
-
-        collect();
-
-        const viewport = window.innerHeight || 800;
-
-        window.scrollBy(0, Math.max(500, viewport * 0.8));
-
-        await new Promise(resolve => setTimeout(resolve, 600));
-
-        /*
-          Espera adicional para lazy-loading.
-        */
-        collect();
-
-        await new Promise(resolve => setTimeout(resolve, 300));
-
-        collect();
-
-        const currentHeight =
-          document.documentElement.scrollHeight;
-
-        const atBottom =
-          window.innerHeight + window.scrollY >=
-          currentHeight - 20;
-
-        if (atBottom) {
-          /*
-            Damos varias oportunidades para que aparezcan
-            nuevas imágenes al llegar al final.
-          */
-          if (currentHeight === lastHeight) {
-            stableBottomRounds++;
-          } else {
-            stableBottomRounds = 0;
-          }
-
-          lastHeight = currentHeight;
-
-          if (stableBottomRounds >= 5) {
-            break;
-          }
-        }
-      }
-
-      collect();
-
-      /*
-        Volvemos arriba para no dejarle la página al usuario
-        en una posición diferente.
-      */
-      window.scrollTo(0, originalScroll);
-
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      const all = Array.from(found.values());
-
-      /*
-        SOLO imágenes que cumplen:
-        ancho >= 900 O alto >= 900
-      */
-      const valid = all.filter(item =>
-        validSize(item.width, item.height)
-      );
-
-      return {
-        totalDetected: all.length,
-        validImages: valid
-      };
-    }
-  });
-}
-
-function createGroup(item, index) {
-  const group = document.createElement("div");
-  group.className = "image-group";
-
-  const title = document.createElement("div");
-  title.className = "group-title";
-
-  title.textContent =
-    `Imagen ${index + 1} — ${item.width} × ${item.height}`;
-
-  group.appendChild(title);
-
-  /*
-    Versión encontrada directamente en la página.
-    ESTA QUEDA SELECCIONADA AUTOMÁTICAMENTE.
-  */
-  const option = document.createElement("label");
-  option.className = "image-option";
-
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = true;
-
-  const text = document.createElement("span");
-  text.textContent =
-    `Página — ${item.width} × ${item.height}`;
-
-  option.appendChild(checkbox);
-  option.appendChild(text);
-
-  group.appendChild(option);
-
-  const record = {
-    url: item.url,
-    width: item.width,
-    height: item.height,
-    selected: true,
-    checkbox
-  };
-
-  results.push(record);
-
-  checkbox.addEventListener("change", () => {
-    record.selected = checkbox.checked;
-    updateCounter();
-  });
-
-  resultsEl.appendChild(group);
-
-  /*
-    IMPORTANTE:
-    Si existe un enlace externo, NO lo seleccionamos todavía.
-    Primero dejamos seleccionada la imagen válida encontrada.
-  */
-
-  if (item.link && item.link !== item.url) {
-    const external = document.createElement("div");
-
-    external.className = "external-status";
-    external.textContent = "Buscando versión externa…";
-
-    group.appendChild(external);
-
-    inspectExternal(item.link, group, record, external);
+  if (stopBtn) {
+    stopBtn.disabled =
+      !state.scanning;
+  }
+
+  if (downloadBtn) {
+
+    const hasSelected =
+      (state.groups || [])
+        .some(
+          group =>
+            !!group.selectedUrl
+        );
+
+    downloadBtn.disabled =
+      state.scanning ||
+      !hasSelected;
   }
 }
 
-async function inspectExternal(url, group, pageRecord, statusNode) {
-  try {
-    const response = await chrome.runtime.sendMessage({
-      action: "inspectDestination",
-      url
-    });
+function formatSize(width, height) {
 
-    if (!response || !response.success) {
-      statusNode.textContent = "No se encontró versión externa.";
-      return;
-    }
+  if (!width && !height) {
+    return "Tamaño desconocido";
+  }
 
-    const versions = response.images || [];
+  return `${width} × ${height}`;
+}
 
-    const validVersions = versions.filter(v =>
-      validSize(
-        Number(v.width) || 0,
-        Number(v.height) || 0
-      )
+function createOption(
+  group,
+  version,
+  type
+) {
+
+  const label =
+    document.createElement(
+      "label"
     );
 
-    if (!validVersions.length) {
-      statusNode.textContent = "No hay una versión externa ≥ 900 px.";
-      return;
-    }
+  label.className =
+    "image-option";
 
-    statusNode.remove();
+  const radio =
+    document.createElement(
+      "input"
+    );
 
-    validVersions.forEach((version, i) => {
-      const option = document.createElement("label");
-      option.className = "image-option";
+  /*
+    Radio en lugar de checkbox:
+    una sola versión por grupo.
+  */
+  radio.type = "radio";
 
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
+  radio.name =
+    `group-${group.id}`;
+
+  radio.value =
+    version.url;
+
+  radio.checked =
+    group.selectedUrl ===
+    version.url;
+
+  const text =
+    document.createElement(
+      "span"
+    );
+
+  text.textContent =
+    `${type} — ${formatSize(
+      version.width,
+      version.height
+    )}`;
+
+  label.appendChild(radio);
+  label.appendChild(text);
+
+  radio.addEventListener(
+    "change",
+    async () => {
+
+      if (!radio.checked) {
+        return;
+      }
+
+      group.selectedUrl =
+        version.url;
 
       /*
-        La versión de la página ya está seleccionada.
-        Las externas empiezan SIN seleccionar.
+        Guardamos inmediatamente
+        la selección en background.
       */
-      checkbox.checked = false;
-
-      const width = Number(version.width) || 0;
-      const height = Number(version.height) || 0;
-
-      const text = document.createElement("span");
-
-      text.textContent =
-        `Externa ${i + 1} — ${width} × ${height}`;
-
-      option.appendChild(checkbox);
-      option.appendChild(text);
-
-      group.appendChild(option);
-
-      const record = {
-        url: version.url,
-        width,
-        height,
-        selected: false,
-        checkbox
-      };
-
-      results.push(record);
-
-      checkbox.addEventListener("change", () => {
-        /*
-          Una sola versión por grupo.
-        */
-        if (checkbox.checked) {
-          group
-            .querySelectorAll('input[type="checkbox"]')
-            .forEach(other => {
-              if (other !== checkbox) {
-                other.checked = false;
-
-                const otherRecord =
-                  results.find(r => r.checkbox === other);
-
-                if (otherRecord) {
-                  otherRecord.selected = false;
-                }
-              }
-            });
-        }
-
-        /*
-          Si selecciona una externa,
-          deseleccionamos la versión de página.
-        */
-        pageRecord.selected = pageRecord.checkbox.checked;
-
-        record.selected = checkbox.checked;
-
-        updateCounter();
+      await chrome.runtime.sendMessage({
+        action:
+          "setSelection",
+        groupId:
+          group.id,
+        selectedUrl:
+          version.url
       });
-    });
 
-    updateCounter();
+      updateCounter();
+      updateButtons();
+    }
+  );
 
-  } catch (error) {
-    statusNode.textContent =
-      "No se pudo revisar el enlace externo.";
-  }
+  return label;
 }
 
-async function scan() {
-  if (scanning) return;
+function renderResults() {
 
-  scanning = true;
-  results = [];
+  if (!resultsEl) {
+    return;
+  }
 
   resultsEl.innerHTML = "";
-  updateProgress("0 imágenes encontradas · 0 seleccionadas");
-  updateStatus("Escaneando toda la página…");
 
-  scanBtn.disabled = true;
-  downloadBtn.disabled = true;
-  stopBtn.disabled = false;
+  const groups =
+    state.groups || [];
+
+  let visibleGroups = 0;
+
+  groups.forEach(
+    (group, index) => {
+
+      const page =
+        group.page;
+
+      const external =
+        group.external || [];
+
+      /*
+        Solo mostramos grupos que tengan
+        por lo menos una versión válida.
+      */
+      const pageValid =
+        page &&
+        (
+          Number(page.width) >= MIN_SIZE ||
+          Number(page.height) >= MIN_SIZE
+        );
+
+      const hasValidExternal =
+        external.length > 0;
+
+      if (
+        !pageValid &&
+        !hasValidExternal
+      ) {
+        return;
+      }
+
+      visibleGroups++;
+
+      const container =
+        document.createElement(
+          "div"
+        );
+
+      container.className =
+        "image-group";
+
+      const title =
+        document.createElement(
+          "div"
+        );
+
+      title.className =
+        "group-title";
+
+      title.textContent =
+        `Imagen ${visibleGroups}`;
+
+      container.appendChild(
+        title
+      );
+
+      /*
+        Versión encontrada directamente
+        en la página.
+      */
+      if (pageValid) {
+
+        container.appendChild(
+          createOption(
+            group,
+            {
+              url: page.url,
+              width: page.width,
+              height: page.height
+            },
+            "Página"
+          )
+        );
+      }
+
+      /*
+        Versiones externas.
+      */
+      external.forEach(
+        (version, i) => {
+
+          container.appendChild(
+            createOption(
+              group,
+              version,
+              `Externa ${i + 1}`
+            )
+          );
+        }
+      );
+
+      resultsEl.appendChild(
+        container
+      );
+    }
+  );
+
+  updateCounter();
+  updateButtons();
+}
+
+async function getState() {
 
   try {
-    const tab = await getActiveTab();
 
-    /*
-      Reiniciamos la bandera de parada.
-    */
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        window.__IMAGE_RIPPER_STOP__ = false;
+    const response =
+      await chrome.runtime.sendMessage({
+        action: "getState"
+      });
+
+    if (
+      response &&
+      response.success &&
+      response.state
+    ) {
+
+      state =
+        response.state;
+
+      renderResults();
+
+      updateButtons();
+
+      if (state.scanning) {
+
+        setStatus(
+          "Escaneando toda la página…"
+        );
+
+      } else if (
+        state.groups &&
+        state.groups.length
+      ) {
+
+        setStatus(
+          "Escaneo terminado."
+        );
+
+      } else {
+
+        setStatus(
+          "Listo para escanear."
+        );
       }
-    });
-
-    const execution = await scanPage(tab.id);
-
-    const data = execution?.[0]?.result;
-
-    if (!data) {
-      throw new Error("No se recibió el resultado del escaneo.");
     }
 
-    updateStatus(
-      `Escaneo terminado. ${data.validImages.length} imágenes válidas.`
-    );
-
-    /*
-      AQUÍ se crean las imágenes y se marcan
-      automáticamente como seleccionadas.
-    */
-    data.validImages.forEach((item, index) => {
-      createGroup(item, index);
-    });
-
-    updateCounter();
-
-    downloadBtn.disabled = results.length === 0;
-
   } catch (error) {
+
     console.error(error);
 
-    updateStatus(
-      "Error durante el escaneo: " + error.message
+    setStatus(
+      "No se pudo recuperar el estado."
+    );
+  }
+}
+
+async function startScan() {
+
+  /*
+    Primero limpiamos el resultado anterior.
+  */
+  await chrome.runtime.sendMessage({
+    action: "clearState"
+  });
+
+  state = {
+    scanning: true,
+    groups: [],
+    totalDetected: 0,
+    validDetected: 0
+  };
+
+  resultsEl.innerHTML = "";
+
+  setStatus(
+    "Preparando escaneo…"
+  );
+
+  setProgress(
+    "0 imágenes encontradas · 0 seleccionadas"
+  );
+
+  updateButtons();
+
+  try {
+
+    const tabs =
+      await chrome.tabs.query({
+        active: true,
+        currentWindow: true
+      });
+
+    if (!tabs.length) {
+      throw new Error(
+        "No hay una pestaña activa."
+      );
+    }
+
+    const tab =
+      tabs[0];
+
+    /*
+      Le pedimos al background que
+      prepare el estado.
+    */
+    const prepared =
+      await chrome.runtime.sendMessage({
+        action: "startScan"
+      });
+
+    if (
+      !prepared ||
+      !prepared.success
+    ) {
+      throw new Error(
+        "No se pudo iniciar el escaneo."
+      );
+    }
+
+    /*
+      El content script ya está instalado
+      en la página.
+
+      Le damos la orden de comenzar.
+    */
+    await chrome.tabs.sendMessage(
+      tab.id,
+      {
+        action:
+          "startScan"
+      }
     );
 
-  } finally {
-    scanning = false;
-    scanBtn.disabled = false;
-    stopBtn.disabled = true;
+    setStatus(
+      "Escaneando toda la página…"
+    );
+
+  } catch (error) {
+
+    console.error(error);
+
+    state.scanning =
+      false;
+
+    setStatus(
+      "No se pudo iniciar: " +
+      error.message
+    );
+
+    updateButtons();
   }
 }
 
 async function stopScan() {
-  if (!scanning) return;
 
   try {
-    const tab = await getActiveTab();
 
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        window.__IMAGE_RIPPER_STOP__ = true;
+    const tabs =
+      await chrome.tabs.query({
+        active: true,
+        currentWindow: true
+      });
+
+    if (!tabs.length) {
+      return;
+    }
+
+    await chrome.tabs.sendMessage(
+      tabs[0].id,
+      {
+        action:
+          "stopScan"
       }
-    });
+    );
 
-    updateStatus("Deteniendo escaneo…");
+    setStatus(
+      "Deteniendo escaneo…"
+    );
 
   } catch (error) {
+
     console.error(error);
   }
 }
 
 async function downloadSelected() {
-  const selected = results.filter(item => item.selected);
+
+  const selected =
+    (state.groups || [])
+      .filter(
+        group =>
+          group.selectedUrl
+      );
 
   if (!selected.length) {
-    updateStatus("No hay imágenes seleccionadas.");
+
+    setStatus(
+      "No hay imágenes seleccionadas."
+    );
+
     return;
   }
 
-  updateStatus(
-    `Descargando ${selected.length} imágenes…`
+  setStatus(
+    `Descargando 0/${selected.length}…`
   );
 
   let completed = 0;
 
-  for (const item of selected) {
+  for (
+    const group of selected
+  ) {
+
     try {
+
       await chrome.downloads.download({
-        url: item.url,
+        url:
+          group.selectedUrl,
         saveAs: false
       });
 
       completed++;
 
-      updateStatus(
-        `Descargando… ${completed}/${selected.length}`
+      setStatus(
+        `Descargando ${completed}/${selected.length}…`
       );
 
     } catch (error) {
+
       console.error(
         "Error descargando:",
-        item.url,
+        group.selectedUrl,
         error
       );
     }
   }
 
-  updateStatus(
+  setStatus(
     `Descarga terminada: ${completed}/${selected.length}.`
   );
 }
 
-scanBtn.addEventListener("click", scan);
-stopBtn.addEventListener("click", stopScan);
-downloadBtn.addEventListener("click", downloadSelected);
+/*
+  Mensajes que llegan mientras el popup
+  está abierto.
+*/
+chrome.runtime.onMessage.addListener(
+  message => {
 
-updateCounter();
+    if (
+      message.action ===
+      "scanProgress"
+    ) {
+
+      state.totalDetected =
+        message.count || 0;
+
+      state.validDetected =
+        message.validCount || 0;
+
+      setStatus(
+        `Escaneando… ${state.totalDetected} imágenes detectadas`
+      );
+
+      setProgress(
+        `${state.totalDetected} detectadas · ${state.validDetected} cumplen ≥ 900 px`
+      );
+
+      return;
+    }
+
+    if (
+      message.action ===
+      "externalResult"
+    ) {
+
+      const group =
+        state.groups.find(
+          g =>
+            g.id ===
+            message.groupId
+        );
+
+      if (!group) {
+        return;
+      }
+
+      group.external =
+        message.external || [];
+
+      group.selectedUrl =
+        message.selectedUrl ||
+        group.selectedUrl;
+
+      renderResults();
+
+      return;
+    }
+
+    if (
+      message.action ===
+      "scanFinished"
+    ) {
+
+      state.scanning =
+        false;
+
+      setStatus(
+        "Escaneo terminado. Revisa las imágenes seleccionadas."
+      );
+
+      renderResults();
+
+      updateButtons();
+
+      return;
+    }
+  }
+);
+
+scanBtn.addEventListener(
+  "click",
+  startScan
+);
+
+stopBtn.addEventListener(
+  "click",
+  stopScan
+);
+
+downloadBtn.addEventListener(
+  "click",
+  downloadSelected
+);
+
+/*
+  Al abrir el popup recuperamos
+  lo que esté haciendo la extensión.
+*/
+getState();
