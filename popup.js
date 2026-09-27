@@ -9,225 +9,305 @@ scanButton.addEventListener("click", scanPage);
 downloadAllButton.addEventListener("click", downloadAll);
 
 async function getActiveTab() {
-  const tabs = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
+const tabs = await chrome.tabs.query({
+active: true,
+currentWindow: true
+});
 
-  return tabs[0];
+return tabs[0];
 }
 
 async function scanPage() {
-  info.textContent = "Escaneando página...";
-  imagesContainer.innerHTML = "";
+info.textContent = "Buscando imágenes y enlaces originales...";
+imagesContainer.innerHTML = "";
 
-  try {
-    const tab = await getActiveTab();
+try {
+const tab = await getActiveTab();
 
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: extractImages
-    });
+const results = await chrome.scripting.executeScript({
+  target: { tabId: tab.id },
+  func: extractImageLinks
+});
 
-    detectedImages = results[0].result || [];
+detectedImages = results[0].result || [];
 
-    renderImages();
+renderImages();
 
-  } catch (error) {
-    console.error(error);
-    info.textContent =
-      "No se pudo analizar esta página. Algunas páginas especiales de Chrome no permiten extensiones.";
+} catch (error) {
+console.error(error);
+info.textContent =
+"No se pudo analizar esta página.";
+}
+}
+
+function extractImageLinks() {
+const results = [];
+const seen = new Set();
+
+function absoluteUrl(url) {
+if (!url) return null;
+
+try {
+  return new URL(url, location.href).href;
+} catch {
+  return null;
+}
+
+}
+
+function addResult(thumbnail, original, width, height) {
+thumbnail = absoluteUrl(thumbnail);
+original = absoluteUrl(original);
+
+if (!original) return;
+
+if (!original.startsWith("http://") &&
+    !original.startsWith("https://")) {
+  return;
+}
+
+if (seen.has(original)) return;
+
+seen.add(original);
+
+results.push({
+  thumbnail: thumbnail || original,
+  original,
+  width: Number(width) || 0,
+  height: Number(height) || 0,
+  area: (Number(width) || 0) * (Number(height) || 0)
+});
+
+}
+
+document.querySelectorAll("img").forEach(img => {
+
+const thumbnail =
+  img.currentSrc ||
+  img.src ||
+  img.getAttribute("data-src");
+
+let original = null;
+
+/*
+ * PRIMERA OPCIÓN:
+ * buscar un enlace que envuelva la miniatura.
+ */
+const link = img.closest("a");
+
+if (link && link.href) {
+  original = link.href;
+}
+
+/*
+ * SEGUNDA OPCIÓN:
+ * atributos comunes utilizados por galerías.
+ */
+if (!original) {
+  const possibleAttributes = [
+    "data-full",
+    "data-full-image",
+    "data-original",
+    "data-original-src",
+    "data-large",
+    "data-large-image",
+    "data-image",
+    "data-src"
+  ];
+
+  for (const attribute of possibleAttributes) {
+    const value = img.getAttribute(attribute);
+
+    if (value) {
+      original = value;
+      break;
+    }
   }
 }
 
-function extractImages() {
-  const results = [];
-  const seen = new Set();
+/*
+ * TERCERA OPCIÓN:
+ * usar srcset y elegir la candidata más grande.
+ */
+if (!original && img.srcset) {
 
-  function addImage(url, width, height) {
-    if (!url) return;
+  let largestWidth = 0;
+  let largestUrl = null;
 
-    try {
-      url = new URL(url, location.href).href;
-    } catch {
-      return;
+  const candidates = img.srcset
+    .split(",")
+    .map(item => item.trim());
+
+  for (const candidate of candidates) {
+
+    const parts = candidate.split(/\s+/);
+    const url = parts[0];
+
+    let width = 0;
+
+    if (parts[1] && parts[1].endsWith("w")) {
+      width = parseInt(parts[1]);
     }
 
-    if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      return;
+    if (width > largestWidth) {
+      largestWidth = width;
+      largestUrl = url;
     }
-
-    if (seen.has(url)) return;
-
-    seen.add(url);
-
-    results.push({
-      url,
-      width: Number(width) || 0,
-      height: Number(height) || 0,
-      area: (Number(width) || 0) * (Number(height) || 0)
-    });
   }
 
-  document.querySelectorAll("img").forEach(img => {
+  if (largestUrl) {
+    original = largestUrl;
+  }
+}
 
-    let bestUrl = img.currentSrc || img.src;
+/*
+ * CUARTA OPCIÓN:
+ * si no encontramos un enlace especial,
+ * usamos la imagen actual.
+ */
+if (!original) {
+  original = thumbnail;
+}
 
-    let bestWidth = img.naturalWidth || img.width || 0;
-    let bestHeight = img.naturalHeight || img.height || 0;
+addResult(
+  thumbnail,
+  original,
+  img.naturalWidth || img.width,
+  img.naturalHeight || img.height
+);
 
-    if (img.srcset) {
-      const candidates = img.srcset
-        .split(",")
-        .map(item => item.trim())
-        .map(item => {
-          const parts = item.split(/\s+/);
+});
 
-          return {
-            url: parts[0],
-            descriptor: parts[1] || ""
-          };
-        });
-
-      for (const candidate of candidates) {
-        let width = 0;
-
-        if (candidate.descriptor.endsWith("w")) {
-          width = parseInt(candidate.descriptor);
-        }
-
-        if (width > bestWidth) {
-          bestWidth = width;
-          bestUrl = candidate.url;
-        }
-      }
-    }
-
-    addImage(bestUrl, bestWidth, bestHeight);
-  });
-
-  document.querySelectorAll("picture source").forEach(source => {
-
-    if (!source.srcset) return;
-
-    const candidates = source.srcset
-      .split(",")
-      .map(item => item.trim());
-
-    for (const candidate of candidates) {
-      const parts = candidate.split(/\s+/);
-      const url = parts[0];
-
-      let width = 0;
-
-      if (parts[1] && parts[1].endsWith("w")) {
-        width = parseInt(parts[1]);
-      }
-
-      addImage(url, width, 0);
-    }
-  });
-
-  return results
-    .sort((a, b) => b.area - a.area);
+return results;
 }
 
 function renderImages() {
 
-  imagesContainer.innerHTML = "";
+imagesContainer.innerHTML = "";
 
-  if (!detectedImages.length) {
-    info.textContent = "No se encontraron imágenes.";
-    imagesContainer.innerHTML =
-      '<div class="empty">No se han detectado imágenes.</div>';
-    return;
-  }
+if (!detectedImages.length) {
+info.textContent = "No se encontraron imágenes.";
 
-  info.textContent =
-    `Encontradas: ${detectedImages.length} imágenes`;
+imagesContainer.innerHTML =
+  '<div class="empty">No se han detectado imágenes.</div>';
 
-  detectedImages.forEach((image, index) => {
+return;
 
-    const item = document.createElement("div");
-    item.className = "image-item";
+}
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = true;
-    checkbox.dataset.index = index;
+info.textContent =
+"Encontradas: ${detectedImages.length} imágenes";
 
-    const preview = document.createElement("img");
-    preview.src = image.url;
+detectedImages.forEach((image, index) => {
 
-    const details = document.createElement("div");
-    details.className = "details";
+const item = document.createElement("div");
+item.className = "image-item";
 
-    const size = document.createElement("div");
-    size.className = "size";
+const checkbox = document.createElement("input");
 
-    if (image.width && image.height) {
-      size.textContent =
-        `${image.width} × ${image.height}`;
-    } else {
-      size.textContent = "Resolución desconocida";
-    }
+checkbox.type = "checkbox";
+checkbox.checked = true;
+checkbox.dataset.index = index;
 
-    const url = document.createElement("div");
-    url.className = "url";
-    url.textContent = image.url;
+const preview = document.createElement("img");
+preview.src = image.thumbnail;
 
-    details.appendChild(size);
-    details.appendChild(url);
+const details = document.createElement("div");
+details.className = "details";
 
-    item.appendChild(checkbox);
-    item.appendChild(preview);
-    item.appendChild(details);
+const size = document.createElement("div");
+size.className = "size";
 
-    imagesContainer.appendChild(item);
-  });
+if (image.width && image.height) {
+  size.textContent =
+    `${image.width} × ${image.height}`;
+} else {
+  size.textContent = "Resolución desconocida";
+}
+
+const url = document.createElement("div");
+url.className = "url";
+
+url.textContent = image.original;
+
+details.appendChild(size);
+details.appendChild(url);
+
+item.appendChild(checkbox);
+item.appendChild(preview);
+item.appendChild(details);
+
+imagesContainer.appendChild(item);
+
+});
 }
 
 async function downloadAll() {
 
-  if (!detectedImages.length) {
-    info.textContent = "Primero debes escanear la página.";
-    return;
-  }
+if (!detectedImages.length) {
+info.textContent =
+"Primero debes escanear la página.";
 
-  const checkboxes =
-    document.querySelectorAll('input[type="checkbox"]:checked');
+return;
 
-  if (!checkboxes.length) {
-    info.textContent = "No hay imágenes seleccionadas.";
-    return;
-  }
+}
+
+const checkboxes =
+document.querySelectorAll(
+'input[type="checkbox"]:checked'
+);
+
+if (!checkboxes.length) {
+info.textContent =
+"No hay imágenes seleccionadas.";
+
+return;
+
+}
+
+info.textContent =
+"Descargando ${checkboxes.length} originales...";
+
+let completed = 0;
+
+for (const checkbox of checkboxes) {
+
+const index =
+  Number(checkbox.dataset.index);
+
+const image =
+  detectedImages[index];
+
+try {
+
+  await chrome.downloads.download({
+    url: image.original,
+    saveAs: false,
+    conflictAction: "uniquify"
+  });
+
+  completed++;
 
   info.textContent =
-    `Descargando ${checkboxes.length} imágenes...`;
+    `Descargando ${completed} de ${checkboxes.length}...`;
 
-  for (const checkbox of checkboxes) {
+  await delay(150);
 
-    const index = Number(checkbox.dataset.index);
-    const image = detectedImages[index];
+} catch (error) {
 
-    try {
+  console.error(
+    "Error descargando:",
+    image.original,
+    error
+  );
+}
 
-      await chrome.downloads.download({
-        url: image.url,
-        saveAs: false
-      });
+}
 
-      await delay(150);
-
-    } catch (error) {
-      console.error("Error descargando:", image.url, error);
-    }
-  }
-
-  info.textContent =
-    `Proceso terminado: ${checkboxes.length} imágenes procesadas.`;
+info.textContent =
+"Terminadas: ${completed} de ${checkboxes.length}";
 }
 
 function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+return new Promise(resolve => setTimeout(resolve, ms));
 }
