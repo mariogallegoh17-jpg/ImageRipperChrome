@@ -1,22 +1,21 @@
 {
-"manifest_version": 3,
-"name": "Image Ripper",
-"version": "4.0.0",
-"description": "Detecta imágenes y busca versiones de mayor resolución mediante sus enlaces.",
-"permissions": [
-"downloads",
-"activeTab",
-"scripting",
-"tabs"
-],
-"host_permissions": [
-"<all_urls>"
-],
-"background": {
-"service_worker": "background.js"
-},
-"action": {
-"default_title": "Image Ripper",
-"default_popup": "popup.html"
-}
+  "manifest_version": 3,
+  "name": "Image Ripper Chrome",
+  "version": "0.5.0",
+  "description": "Detecta imágenes de 900 px o más y permite elegir qué versión descargar.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
 }
