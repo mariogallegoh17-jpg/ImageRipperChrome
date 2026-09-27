@@ -1,4 +1,5 @@
 let detectedImages = [];
+let versions = [];
 
 const scanButton =
 document.getElementById("scan");
@@ -19,7 +20,7 @@ scanPage
 
 downloadAllButton.addEventListener(
 "click",
-downloadAll
+downloadSelected
 );
 
 async function getActiveTab() {
@@ -36,7 +37,7 @@ return tabs[0];
 async function scanPage() {
 
 info.textContent =
-"Buscando imágenes y enlaces originales...";
+"Analizando imágenes...";
 
 imagesContainer.innerHTML = "";
 
@@ -45,344 +46,268 @@ try {
 const tab =
   await getActiveTab();
 
-const results =
+const result =
   await chrome.scripting.executeScript({
     target: {
       tabId: tab.id
     },
-    func: extractImages
+    func: () => {
+
+      const images = [];
+
+      document.querySelectorAll("img")
+        .forEach(img => {
+
+          const thumbnail =
+            img.currentSrc ||
+            img.src;
+
+          if (!thumbnail) return;
+
+          const link =
+            img.closest("a[href]");
+
+          images.push({
+
+            url:
+              thumbnail,
+
+            link:
+              link ?
+              link.href :
+              null,
+
+            width:
+              img.naturalWidth ||
+              img.width ||
+              0,
+
+            height:
+              img.naturalHeight ||
+              img.height ||
+              0
+          });
+        });
+
+      return images;
+    }
   });
 
 detectedImages =
-  results[0].result || [];
+  result?.[0]?.result || [];
 
-renderImages();
+if (!detectedImages.length) {
+
+  info.textContent =
+    "No se encontraron imágenes.";
+
+  return;
+}
+
+info.textContent =
+  `Encontradas ${detectedImages.length}. Buscando versiones...`;
+
+const response =
+  await chrome.runtime.sendMessage({
+    type:
+      "FIND_VERSIONS",
+
+    images:
+      detectedImages
+  });
+
+if (
+  !response ||
+  !response.success
+) {
+
+  info.textContent =
+    "No se pudieron buscar las versiones.";
+
+  return;
+}
+
+versions =
+  response.results || [];
+
+renderVersions();
 
 } catch (error) {
 
 console.error(error);
 
 info.textContent =
-  "No se pudo analizar esta página.";
+  "Error durante el análisis.";
 
 }
 }
 
-function extractImages() {
+function formatSize(width, height) {
 
-const results = [];
-const seen = new Set();
-
-function absoluteUrl(url) {
-
-if (!url) return null;
-
-try {
-  return new URL(
-    url,
-    location.href
-  ).href;
-} catch {
-  return null;
-}
-
-}
-
-function addImage(
-thumbnail,
-target,
-width,
+if (
+width &&
 height
 ) {
 
-thumbnail =
-  absoluteUrl(thumbnail);
-
-target =
-  absoluteUrl(target);
-
-if (!target) return;
-
-if (
-  !target.startsWith("http://") &&
-  !target.startsWith("https://")
-) {
-  return;
-}
-
-if (seen.has(target)) return;
-
-seen.add(target);
-
-results.push({
-
-  thumbnail:
-    thumbnail || target,
-
-  target,
-
-  width:
-    Number(width) || 0,
-
-  height:
-    Number(height) || 0
-});
+return `${width} × ${height}`;
 
 }
 
-document
-.querySelectorAll("img")
-.forEach(img => {
-
-  const thumbnail =
-    img.currentSrc ||
-    img.src ||
-    img.getAttribute("data-src");
-
-  let target = null;
-
-  /*
-   * Si la imagen está dentro de un enlace,
-   * ese enlace es nuestro candidato principal.
-   */
-  const link =
-    img.closest("a[href]");
-
-  if (
-    link &&
-    link.href
-  ) {
-    target =
-      link.href;
-  }
-
-  /*
-   * Atributos utilizados frecuentemente
-   * para almacenar imágenes grandes.
-   */
-  if (!target) {
-
-    const attributes = [
-
-      "data-original",
-      "data-original-src",
-      "data-full",
-      "data-full-image",
-      "data-large",
-      "data-large-image",
-      "data-image",
-      "data-src"
-    ];
-
-    for (
-      const attribute
-      of attributes
-    ) {
-
-      const value =
-        img.getAttribute(attribute);
-
-      if (value) {
-
-        target = value;
-
-        break;
-      }
-    }
-  }
-
-  /*
-   * Si existe srcset buscamos la versión
-   * con mayor ancho.
-   */
-  if (
-    !target &&
-    img.srcset
-  ) {
-
-    let largestWidth = 0;
-    let largestUrl = null;
-
-    const candidates =
-      img.srcset
-        .split(",")
-        .map(
-          item => item.trim()
-        );
-
-    for (
-      const candidate
-      of candidates
-    ) {
-
-      const parts =
-        candidate.split(/\s+/);
-
-      const url =
-        parts[0];
-
-      let width = 0;
-
-      if (
-        parts[1] &&
-        parts[1].endsWith("w")
-      ) {
-
-        width =
-          parseInt(
-            parts[1],
-            10
-          ) || 0;
-      }
-
-      if (
-        width >
-        largestWidth
-      ) {
-
-        largestWidth =
-          width;
-
-        largestUrl =
-          url;
-      }
-    }
-
-    if (largestUrl) {
-      target =
-        largestUrl;
-    }
-  }
-
-  /*
-   * Como último recurso usamos la propia imagen.
-   */
-  if (!target) {
-    target = thumbnail;
-  }
-
-  addImage(
-    thumbnail,
-    target,
-    img.naturalWidth ||
-      img.width,
-
-    img.naturalHeight ||
-      img.height
-  );
-});
-
-return results;
+return "Resolución no determinada";
 }
 
-function renderImages() {
+function renderVersions() {
 
 imagesContainer.innerHTML = "";
 
-if (!detectedImages.length) {
+let totalVersions = 0;
 
-info.textContent =
-  "No se encontraron imágenes.";
+versions.forEach(
+(group, groupIndex) => {
 
-imagesContainer.innerHTML =
-  '<div class="empty">No se han detectado imágenes.</div>';
-
-return;
-
-}
-
-info.textContent =
-"Encontradas: ${detectedImages.length} imágenes";
-
-detectedImages.forEach(
-(image, index) => {
-
-  const item =
+  const box =
     document.createElement("div");
 
-  item.className =
-    "image-item";
+  box.style.marginBottom =
+    "18px";
 
-  const checkbox =
-    document.createElement("input");
+  box.style.padding =
+    "10px";
 
-  checkbox.type =
-    "checkbox";
+  box.style.background =
+    "#191919";
 
-  checkbox.checked =
-    true;
+  box.style.border =
+    "1px solid #333";
 
-  checkbox.dataset.index =
-    index;
+  box.style.borderRadius =
+    "8px";
 
-  const preview =
-    document.createElement("img");
-
-  preview.src =
-    image.thumbnail;
-
-  const details =
+  const title =
     document.createElement("div");
 
-  details.className =
-    "details";
+  title.textContent =
+    `IMAGEN ${groupIndex + 1}`;
 
-  const size =
-    document.createElement("div");
+  title.style.fontWeight =
+    "bold";
 
-  size.className =
-    "size";
+  title.style.marginBottom =
+    "8px";
 
-  if (
-    image.width &&
-    image.height
-  ) {
+  box.appendChild(title);
 
-    size.textContent =
-      `${image.width} × ${image.height}`;
+  group.versions.forEach(
+    (version, versionIndex) => {
 
-  } else {
+      totalVersions++;
 
-    size.textContent =
-      "Resolución desconocida";
-  }
+      const row =
+        document.createElement("label");
 
-  const url =
-    document.createElement("div");
+      row.style.display =
+        "flex";
 
-  url.className =
-    "url";
+      row.style.alignItems =
+        "center";
 
-  url.textContent =
-    image.target;
+      row.style.gap =
+        "8px";
 
-  details.appendChild(size);
-  details.appendChild(url);
+      row.style.padding =
+        "8px 4px";
 
-  item.appendChild(checkbox);
-  item.appendChild(preview);
-  item.appendChild(details);
+      row.style.borderTop =
+        "1px solid #292929";
 
-  imagesContainer.appendChild(item);
+      const checkbox =
+        document.createElement("input");
+
+      checkbox.type =
+        "checkbox";
+
+      checkbox.dataset.group =
+        groupIndex;
+
+      checkbox.dataset.version =
+        versionIndex;
+
+      /*
+       * Por defecto seleccionamos únicamente
+       * la versión que aparece en la página.
+       */
+      checkbox.checked =
+        version.source ===
+        "Página actual";
+
+      const text =
+        document.createElement("div");
+
+      text.style.flex =
+        "1";
+
+      const resolution =
+        document.createElement("strong");
+
+      resolution.textContent =
+        formatSize(
+          version.width,
+          version.height
+        );
+
+      const source =
+        document.createElement("div");
+
+      source.textContent =
+        version.source;
+
+      source.style.fontSize =
+        "11px";
+
+      source.style.color =
+        "#999";
+
+      source.style.marginTop =
+        "3px";
+
+      text.appendChild(
+        resolution
+      );
+
+      text.appendChild(
+        source
+      );
+
+      row.appendChild(
+        checkbox
+      );
+
+      row.appendChild(
+        text
+      );
+
+      box.appendChild(
+        row
+      );
+    }
+  );
+
+  imagesContainer.appendChild(
+    box
+  );
 }
 
 );
-}
-
-async function downloadAll() {
-
-if (!detectedImages.length) {
 
 info.textContent =
-  "Primero debes escanear la página.";
-
-return;
-
+"${versions.length} imágenes · ${totalVersions} versiones encontradas";
 }
+
+async function downloadSelected() {
 
 const selected =
 [
-...document.querySelectorAll(
+...imagesContainer.querySelectorAll(
 'input[type="checkbox"]:checked'
 )
 ];
@@ -390,63 +315,72 @@ const selected =
 if (!selected.length) {
 
 info.textContent =
-  "No hay imágenes seleccionadas.";
+  "Selecciona al menos una versión.";
 
 return;
 
 }
 
-let completed = 0;
-let failed = 0;
+const items = [];
 
-for (
-const checkbox
-of selected
-) {
+for (const checkbox of selected) {
 
-const index =
+const groupIndex =
   Number(
-    checkbox.dataset.index
+    checkbox.dataset.group
   );
 
-const image =
-  detectedImages[index];
+const versionIndex =
+  Number(
+    checkbox.dataset.version
+  );
+
+const version =
+  versions[
+    groupIndex
+  ]?.versions[
+    versionIndex
+  ];
+
+if (version) {
+  items.push(version);
+}
+
+}
 
 info.textContent =
-  `Procesando ${completed + failed + 1} de ${selected.length}...`;
+"Descargando ${items.length} imágenes...";
 
 try {
 
-  const result =
-    await chrome.runtime.sendMessage({
-      type:
-        "DOWNLOAD_ORIGINAL",
+const response =
+  await chrome.runtime.sendMessage({
+    type:
+      "DOWNLOAD_SELECTED",
 
-      url:
-        image.target
-    });
+    items
+  });
 
-  if (
-    result &&
-    result.success
-  ) {
+if (
+  response &&
+  response.success
+) {
 
-    completed++;
+  info.textContent =
+    `Descargadas: ${response.downloaded}. Fallidas: ${response.failed}.`;
 
-  } else {
+} else {
 
-    failed++;
-  }
+  info.textContent =
+    "No se pudieron completar las descargas.";
+}
 
 } catch (error) {
 
-  console.error(error);
-
-  failed++;
-}
-
-}
+console.error(error);
 
 info.textContent =
-"Terminadas: ${completed}. No encontradas: ${failed}.";
+  "Error durante la descarga.";
+
+}
 }
