@@ -1,8 +1,8 @@
 {
 "manifest_version": 3,
 "name": "Image Ripper",
-"version": "3.0.0",
-"description": "Detecta, localiza y descarga imágenes originales de páginas web.",
+"version": "4.0.0",
+"description": "Detecta imágenes y busca versiones de mayor resolución mediante sus enlaces.",
 "permissions": [
 "downloads",
 "activeTab",
