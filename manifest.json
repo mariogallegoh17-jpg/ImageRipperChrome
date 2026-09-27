@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Image Ripper Chrome",
-  "version": "0.5.0",
-  "description": "Detecta imágenes de 900 px o más y permite elegir qué versión descargar.",
+  "version": "0.6.0",
+  "description": "Escanea toda la página, detecta imágenes de 900 px o más y permite descargarlas.",
   "permissions": [
     "activeTab",
     "scripting",
