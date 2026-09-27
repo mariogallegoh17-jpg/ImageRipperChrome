@@ -1,10 +1,12 @@
-<!DOCTYPE html><html lang="es"><head>  <meta charset="UTF-8"><meta
-name="viewport"
-content="width=device-width, initial-scale=1.0"
+<!DOCTYPE html>
+<html lang="es">
 
-«»
+<head>
+  <meta charset="UTF-8">
 
-  <title>Image Ripper</title>  <style>
+  <title>Image Ripper</title>
+
+  <style>
 
     * {
       box-sizing: border-box;
@@ -12,103 +14,132 @@ content="width=device-width, initial-scale=1.0"
 
     body {
       margin: 0;
-      width: 390px;
-      max-height: 600px;
-      overflow-y: auto;
-      background: #101010;
+      width: 420px;
+      min-height: 500px;
+      background: #111;
       color: #eee;
       font-family: Arial, sans-serif;
     }
 
     header {
-      padding: 16px;
-      background: #181818;
-      border-bottom: 1px solid #333;
       position: sticky;
       top: 0;
       z-index: 10;
+      background: #181818;
+      padding: 14px;
+      border-bottom: 1px solid #333;
     }
 
     h1 {
-      margin: 0;
-      font-size: 21px;
-      letter-spacing: 1px;
+      margin: 0 0 10px;
+      font-size: 20px;
     }
 
-    .subtitle {
-      margin-top: 5px;
-      color: #888;
-      font-size: 11px;
-    }
-
-    .controls {
-      padding: 12px;
-      display: flex;
-      gap: 8px;
-      position: sticky;
-      top: 73px;
-      background: #101010;
-      z-index: 9;
+    .rule {
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 10px;
     }
 
     button {
-      flex: 1;
-      border: 1px solid #555;
-      border-radius: 7px;
-      padding: 11px 7px;
-      background: #272727;
+      width: 100%;
+      padding: 11px;
+      margin-top: 7px;
+      border: 0;
+      border-radius: 6px;
+      background: #8b0000;
       color: white;
       font-weight: bold;
       cursor: pointer;
     }
 
     button:hover {
-      background: #353535;
+      background: #b00000;
     }
 
-    #downloadAll {
-      background: #761414;
-      border-color: #a32929;
-    }
-
-    #downloadAll:hover {
-      background: #962020;
-    }
-
-    .info {
-      padding: 0 12px 10px;
-      color: #aaa;
+    #status {
+      margin-top: 9px;
       font-size: 12px;
+      color: #aaa;
     }
 
-    #images {
-      padding: 0 12px 18px;
+    #results {
+      padding: 10px;
     }
 
-    .empty {
-      padding: 30px 15px;
-      text-align: center;
-      color: #777;
+    .image-group {
+      margin-bottom: 12px;
+      padding: 10px;
+      background: #1b1b1b;
+      border: 1px solid #333;
+      border-radius: 7px;
     }
 
-  </style></head><body>  <header><h1>IMAGE RIPPER</h1>
+    .image-title {
+      font-weight: bold;
+      margin-bottom: 8px;
+      color: #fff;
+    }
 
-<div class="subtitle">
-  Detector de imágenes y versiones originales
-</div>
+    .version {
+      display: flex;
+      gap: 9px;
+      align-items: flex-start;
+      padding: 8px;
+      margin-top: 5px;
+      background: #242424;
+      border-radius: 5px;
+      cursor: pointer;
+    }
 
-  </header>  <div class="controls"><button id="scan">
-  ESCANEAR
-</button>
+    .version:hover {
+      background: #303030;
+    }
 
-<button id="downloadAll">
-  DESCARGAR SELECCIONADAS
-</button>
+    .version input {
+      margin-top: 3px;
+    }
 
-  </div>  <div id="info" class="info">
-    Pulsa ESCANEAR para comenzar.
-  </div>  <div id="images"><div class="empty">
-  No se han detectado imágenes.
-</div>
+    .version strong {
+      font-size: 13px;
+    }
 
-  </div>  <script src="popup.js"></script></body></html>
+    .version small {
+      color: #aaa;
+      font-size: 11px;
+    }
+
+  </style>
+</head>
+
+<body>
+
+  <header>
+
+    <h1>IMAGE RIPPER</h1>
+
+    <div class="rule">
+      Solo imágenes con ancho o alto de 900 px o más.
+    </div>
+
+    <button id="scan">
+      ESCANEAR IMÁGENES
+    </button>
+
+    <button id="download">
+      DESCARGAR SELECCIONADAS
+    </button>
+
+    <div id="status">
+      Listo.
+    </div>
+
+  </header>
+
+  <main id="results"></main>
+
+  <script src="popup.js"></script>
+
+</body>
+
+</html>
