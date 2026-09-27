@@ -10,11 +10,11 @@ const progressText = document.getElementById("progress");
 
 let groups = [];
 let scanning = false;
-let scanStopped = false;
+let stopRequested = false;
 
 
 // =====================================================
-// COMPROBAR DIMENSIONES
+// TAMAÑO MÍNIMO
 // =====================================================
 
 function validSize(width, height) {
@@ -23,7 +23,7 @@ function validSize(width, height) {
 
 
 // =====================================================
-// FORMATO DE DIMENSIONES
+// FORMATO
 // =====================================================
 
 function formatSize(width, height) {
@@ -37,7 +37,7 @@ function formatSize(width, height) {
 
 
 // =====================================================
-// SEGURIDAD HTML
+// SEGURIDAD
 // =====================================================
 
 function escapeHtml(text) {
@@ -52,15 +52,24 @@ function escapeHtml(text) {
 
 
 // =====================================================
-// OBTENER IMÁGENES ACTUALES
+// ESCANEAR TODA LA PÁGINA
+//
+// IMPORTANTE:
+// El escaneo y el scroll ocurren dentro de la página.
+// En cada paso se capturan las imágenes nuevas.
 // =====================================================
 
-async function getCurrentImages() {
+async function scanWholePage() {
 
   const [tab] = await chrome.tabs.query({
     active: true,
     currentWindow: true
   });
+
+  if (!tab || !tab.id) {
+    throw new Error("No se encontró la pestaña.");
+  }
+
 
   const result = await chrome.scripting.executeScript({
 
@@ -68,164 +77,396 @@ async function getCurrentImages() {
       tabId: tab.id
     },
 
-    func: () => {
-
-      const images = [];
-
-      document.querySelectorAll("img").forEach((img, index) => {
-
-        const width =
-          img.naturalWidth ||
-          img.width ||
-          0;
-
-        const height =
-          img.naturalHeight ||
-          img.height ||
-          0;
-
-        let link = "";
-
-        const anchor = img.closest("a");
-
-        if (anchor) {
-          link = anchor.href || "";
-        }
-
-        images.push({
-
-          index,
-
-          url:
-            img.currentSrc ||
-            img.src ||
-            "",
-
-          width,
-
-          height,
-
-          link
-        });
-      });
-
-      return images;
-    }
-  });
-
-  return result?.[0]?.result || [];
-}
-
-
-// =====================================================
-// HACER SCROLL PROGRESIVO
-// =====================================================
-
-async function scrollPageCompletely() {
-
-  const [tab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
-
-  return await chrome.scripting.executeScript({
-
-    target: {
-      tabId: tab.id
-    },
-
     func: async () => {
+
+      const MIN = 900;
+
+      const imageMap = new Map();
 
       const originalPosition = window.scrollY;
 
-      let lastHeight = 0;
-      let stableRounds = 0;
 
-      const maxRounds = 300;
+      function addImages() {
 
-      for (let round = 0; round < maxRounds; round++) {
+        document.querySelectorAll("img").forEach(img => {
 
-        // Bajar una pantalla
-        window.scrollBy(
-          0,
-          Math.max(
-            600,
-            window.innerHeight * 0.85
-          )
-        );
+          const url =
+            img.currentSrc ||
+            img.src ||
+            "";
 
-        // Esperar carga de imágenes / contenido
+          if (!url) return;
+
+
+          const width =
+            img.naturalWidth ||
+            img.width ||
+            0;
+
+
+          const height =
+            img.naturalHeight ||
+            img.height ||
+            0;
+
+
+          let link = "";
+
+          const anchor =
+            img.closest("a");
+
+          if (anchor) {
+            link = anchor.href || "";
+          }
+
+
+          /*
+           * Usamos URL + enlace como identificación.
+           * Así evitamos duplicar la misma imagen.
+           */
+
+          const key =
+            url.split("#")[0] +
+            "|" +
+            link;
+
+
+          const old =
+            imageMap.get(key);
+
+
+          if (!old) {
+
+            imageMap.set(key, {
+
+              url,
+
+              width,
+
+              height,
+
+              link
+            });
+
+          } else {
+
+            /*
+             * Si posteriormente la imagen
+             * obtiene dimensiones reales,
+             * actualizamos.
+             */
+
+            if (width > old.width) {
+              old.width = width;
+            }
+
+            if (height > old.height) {
+              old.height = height;
+            }
+
+            if (!old.link && link) {
+              old.link = link;
+            }
+          }
+        });
+      }
+
+
+      /*
+       * Primera captura.
+       */
+
+      addImages();
+
+
+      let previousHeight =
+        document.documentElement.scrollHeight;
+
+      let bottomStable = 0;
+
+      const MAX_ROUNDS = 250;
+
+
+      for (
+        let round = 0;
+        round < MAX_ROUNDS;
+        round++
+      ) {
+
+        /*
+         * Capturar antes de bajar.
+         */
+
+        addImages();
+
+
+        /*
+         * Bajar aproximadamente una pantalla.
+         */
+
+        window.scrollBy({
+
+          top:
+            Math.max(
+              500,
+              window.innerHeight * 0.85
+            ),
+
+          behavior: "instant"
+        });
+
+
+        /*
+         * Esperar lazy loading.
+         */
+
         await new Promise(resolve =>
-          setTimeout(resolve, 700)
+          setTimeout(resolve, 450)
         );
 
-        // Esperar un poco más si la página
-        // está agregando contenido dinámicamente
-        await new Promise(resolve =>
-          setTimeout(resolve, 200)
-        );
+
+        /*
+         * Capturar inmediatamente las nuevas.
+         */
+
+        addImages();
+
 
         const currentHeight =
           document.documentElement.scrollHeight;
 
-        const currentPosition =
-          window.scrollY + window.innerHeight;
+
+        const atBottom =
+          window.scrollY +
+          window.innerHeight >=
+          currentHeight - 10;
+
 
         if (
-          currentHeight === lastHeight &&
-          currentPosition >= currentHeight - 10
+          atBottom &&
+          currentHeight === previousHeight
         ) {
 
-          stableRounds++;
+          bottomStable++;
 
         } else {
 
-          stableRounds = 0;
+          bottomStable = 0;
         }
 
-        lastHeight = currentHeight;
 
-        // Si llevamos varias comprobaciones
-        // sin contenido nuevo, consideramos
-        // que llegamos al final.
-        if (stableRounds >= 4) {
+        previousHeight =
+          currentHeight;
+
+
+        /*
+         * Si llegamos al final y durante varias
+         * comprobaciones no aparece contenido nuevo,
+         * terminamos.
+         */
+
+        if (bottomStable >= 4) {
           break;
-        }
-
-        // Si ya estamos al final
-        if (
-          window.scrollY + window.innerHeight
-          >= document.documentElement.scrollHeight - 5
-        ) {
-
-          // Dar oportunidad a lazy loading
-          await new Promise(resolve =>
-            setTimeout(resolve, 1200)
-          );
-
-          const finalHeight =
-            document.documentElement.scrollHeight;
-
-          if (finalHeight === currentHeight) {
-            break;
-          }
         }
       }
 
-      // Volver al lugar donde estaba el usuario
+
+      /*
+       * Última captura.
+       */
+
+      addImages();
+
+
+      /*
+       * Volver a la posición original.
+       */
+
       window.scrollTo({
+
         top: originalPosition,
+
         behavior: "instant"
       });
 
-      return true;
+
+      /*
+       * Convertir Map a Array.
+       */
+
+      const all =
+        [...imageMap.values()];
+
+
+      /*
+       * Filtrar aquí mismo por 900 px o más.
+       */
+
+      const valid =
+        all.filter(image =>
+          image.width >= MIN ||
+          image.height >= MIN
+        );
+
+
+      return {
+
+        totalDetected: all.length,
+
+        validImages: valid
+      };
     }
   });
+
+
+  return result?.[0]?.result || {
+    totalDetected: 0,
+    validImages: []
+  };
 }
 
 
 // =====================================================
-// INSPECCIONAR ENLACE EXTERNO
+// PROCESAR UNA IMAGEN
+// =====================================================
+
+async function processImage(image, number) {
+
+  const versions = [];
+
+
+  /*
+   * La imagen que encontramos directamente
+   * en la página ya cumple >=900.
+   */
+
+  versions.push({
+
+    url: image.url,
+
+    width: image.width,
+
+    height: image.height,
+
+    source: "Página actual",
+
+    checked: true
+  });
+
+
+  /*
+   * Si tiene enlace asociado,
+   * buscamos versiones adicionales.
+   */
+
+  if (image.link) {
+
+    try {
+
+      statusText.textContent =
+        `Buscando versión externa de la imagen ${number}...`;
+
+
+      const externalVersions =
+        await inspectExternalLink(
+          image.link
+        );
+
+
+      for (
+        const version of externalVersions
+      ) {
+
+        if (!version.url) {
+          continue;
+        }
+
+
+        /*
+         * Solo agregar versiones que
+         * realmente cumplen >=900.
+         */
+
+        if (
+          version.width >= MIN_SIZE ||
+          version.height >= MIN_SIZE
+        ) {
+
+          versions.push({
+
+            ...version,
+
+            checked: false
+          });
+        }
+      }
+
+    } catch (error) {
+
+      console.error(
+        "Error en enlace externo:",
+        error
+      );
+    }
+  }
+
+
+  /*
+   * Eliminar duplicados.
+   */
+
+  const unique = [];
+
+  const seen = new Set();
+
+
+  versions.forEach(version => {
+
+    const key =
+      version.url?.split("#")[0];
+
+
+    if (!key || seen.has(key)) {
+      return;
+    }
+
+
+    seen.add(key);
+
+    unique.push(version);
+  });
+
+
+  /*
+   * Solo una versión seleccionada
+   * inicialmente.
+   *
+   * La página actual queda seleccionada.
+   */
+
+  unique.forEach((version, index) => {
+
+    version.checked =
+      index === 0;
+  });
+
+
+  groups.push({
+
+    number,
+
+    versions: unique
+  });
+
+
+  renderResults();
+
+  updateSelectedCounter();
+}
+
+
+// =====================================================
+// ENLACE EXTERNO
 // =====================================================
 
 async function inspectExternalLink(url) {
@@ -233,75 +474,31 @@ async function inspectExternalLink(url) {
   return new Promise(resolve => {
 
     chrome.runtime.sendMessage(
+
       {
         action: "inspectDestination",
         url
       },
+
       response => {
 
-        if (!response || !response.success) {
+        if (
+          !response ||
+          !response.success
+        ) {
+
           resolve([]);
+
           return;
         }
 
-        resolve(response.versions || []);
+
+        resolve(
+          response.versions || []
+        );
       }
     );
   });
-}
-
-
-// =====================================================
-// AGREGAR / ACTUALIZAR IMÁGENES
-// =====================================================
-
-function buildGroups(images) {
-
-  const map = new Map();
-
-  for (const image of images) {
-
-    if (!image.url) continue;
-
-    /*
-     * La URL se utiliza para evitar
-     * duplicados.
-     */
-    const key = image.url.split("#")[0];
-
-    if (map.has(key)) {
-
-      const existing = map.get(key);
-
-      /*
-       * Si posteriormente conseguimos
-       * mejores dimensiones, actualizarlas.
-       */
-      if (
-        image.width > existing.width ||
-        image.height > existing.height
-      ) {
-
-        existing.width = image.width;
-        existing.height = image.height;
-      }
-
-      if (!existing.link && image.link) {
-        existing.link = image.link;
-      }
-
-      continue;
-    }
-
-    map.set(key, {
-      url: image.url,
-      width: image.width || 0,
-      height: image.height || 0,
-      link: image.link || ""
-    });
-  }
-
-  return [...map.values()];
 }
 
 
@@ -311,121 +508,119 @@ function buildGroups(images) {
 
 async function scan() {
 
-  if (scanning) return;
+  if (scanning) {
+    return;
+  }
+
 
   scanning = true;
-  scanStopped = false;
 
-  scanButton.disabled = true;
-  downloadButton.disabled = true;
-  stopButton.style.display = "block";
+  stopRequested = false;
 
   groups = [];
 
+
+  scanButton.disabled = true;
+
+  downloadButton.disabled = true;
+
+  stopButton.style.display = "block";
+
+
   resultsContainer.innerHTML = "";
 
+
   statusText.textContent =
-    "Preparando escaneo completo...";
+    "Escaneando toda la página...";
+
 
   progressText.textContent =
-    "0 imágenes detectadas";
+    "Buscando imágenes...";
 
 
   try {
 
-    // -----------------------------------------------
-    // PRIMERA CAPTURA
-    // -----------------------------------------------
+    /*
+     * PRIMERA ETAPA:
+     * recorrer la página y recoger imágenes.
+     */
 
-    let allImages = await getCurrentImages();
-
-    let uniqueImages =
-      buildGroups(allImages);
-
-    progressText.textContent =
-      `${uniqueImages.length} imágenes detectadas`;
+    const result =
+      await scanWholePage();
 
 
-    // -----------------------------------------------
-    // RECORRER TODA LA PÁGINA
-    // -----------------------------------------------
+    if (stopRequested) {
 
-    statusText.textContent =
-      "Recorriendo toda la página...";
-
-    await scrollPageCompletely();
-
-
-    if (scanStopped) {
       finishScan();
+
       return;
     }
 
 
-    // -----------------------------------------------
-    // CAPTURA FINAL
-    // -----------------------------------------------
-
-    allImages = await getCurrentImages();
-
-    uniqueImages =
-      buildGroups(allImages);
+    const images =
+      result.validImages || [];
 
 
     progressText.textContent =
-      `${uniqueImages.length} imágenes encontradas`;
+      `${images.length} imágenes de 900 px o más encontradas`;
 
 
-    // -----------------------------------------------
-    // FILTRAR POR 900 PX
-    // -----------------------------------------------
-
-    const validImages =
-      uniqueImages.filter(image =>
-        validSize(
-          image.width,
-          image.height
-        )
-      );
-
-
-    statusText.textContent =
-      `Procesando ${validImages.length} imágenes válidas...`;
-
-
-    // -----------------------------------------------
-    // CREAR GRUPOS
-    // -----------------------------------------------
-
-    groups = [];
+    /*
+     * SEGUNDA ETAPA:
+     * procesar imágenes válidas.
+     *
+     * Aquí ya empezamos a mostrarlas.
+     */
 
     let number = 0;
 
-    for (const image of validImages) {
 
-      if (scanStopped) break;
+    for (const image of images) {
 
-      const versions = [];
+      if (stopRequested) {
+        break;
+      }
 
-      // Imagen que está en la página
-      versions.push({
 
-        url: image.url,
-
-        width: image.width,
-
-        height: image.height,
-
-        source: "Página actual",
-
-        checked: true
-      });
+      number++;
 
 
       /*
-       * Si tiene enlace asociado, buscar
-       * versiones adicionales.
+       * Mostrar inmediatamente la imagen
+       * de la página.
        */
+
+      groups.push({
+
+        number,
+
+        versions: [
+
+          {
+            url: image.url,
+
+            width: image.width,
+
+            height: image.height,
+
+            source: "Página actual",
+
+            checked: true
+          }
+
+        ]
+      });
+
+
+      renderResults();
+
+      updateSelectedCounter();
+
+
+      /*
+       * Buscar enlace externo después.
+       */
+
       if (image.link) {
 
         try {
@@ -436,116 +631,80 @@ async function scan() {
             );
 
 
-          externalVersions.forEach(version => {
+          const group =
+            groups[groups.length - 1];
 
-            if (!version.url) return;
 
+          for (
+            const version of externalVersions
+          ) {
 
-            /*
-             * Solo mostrar versiones
-             * que realmente cumplen >=900
-             *
-             * Si no conocemos las dimensiones,
-             * no la incluimos todavía.
-             */
+            if (!version.url) {
+              continue;
+            }
+
 
             if (
-              validSize(
-                version.width,
-                version.height
-              )
+              version.width >= MIN_SIZE ||
+              version.height >= MIN_SIZE
             ) {
 
-              versions.push({
+              const duplicate =
+                group.versions.some(
+                  existing =>
+                    existing.url.split("#")[0] ===
+                    version.url.split("#")[0]
+                );
 
-                ...version,
 
-                checked: false
-              });
+              if (!duplicate) {
+
+                group.versions.push({
+
+                  ...version,
+
+                  checked: false
+                });
+              }
             }
-          });
+          }
+
+
+          renderResults();
+
+          updateSelectedCounter();
 
         } catch (error) {
 
-          console.error(
-            "Error procesando enlace:",
-            error
-          );
+          console.error(error);
         }
       }
 
 
-      // -------------------------------------------
-      // ELIMINAR DUPLICADOS
-      // -------------------------------------------
-
-      const uniqueVersions = [];
-
-      const seen = new Set();
-
-      versions.forEach(version => {
-
-        const key =
-          version.url?.split("#")[0];
-
-        if (!key || seen.has(key)) return;
-
-        seen.add(key);
-
-        uniqueVersions.push(version);
-      });
-
-
-      if (!uniqueVersions.length) continue;
-
-
-      number++;
-
-
-      groups.push({
-
-        number,
-
-        versions: uniqueVersions
-      });
-
-
-      // Actualizar progreso
       progressText.textContent =
-        `${number} imágenes válidas procesadas`;
-
-      renderResults();
+        `${groups.length} imágenes encontradas · ${getSelectedCount()} seleccionadas`;
     }
 
 
-    finishScan();
+    statusText.textContent =
+      "Escaneo terminado.";
+
+
+    updateSelectedCounter();
 
 
   } catch (error) {
 
-    console.error(error);
+    console.error(
+      "Error durante el escaneo:",
+      error
+    );
+
 
     statusText.textContent =
-      "Ocurrió un error durante el escaneo.";
-
-  } finally {
-
-    scanning = false;
-
-    scanButton.disabled = false;
-
-    downloadButton.disabled = false;
-
-    stopButton.style.display = "none";
+      "Error durante el escaneo. Revisa la consola.";
   }
-}
 
-
-// =====================================================
-// FINALIZAR ESCANEO
-// =====================================================
-
-function finishScan() {
 
   scanning = false;
 
@@ -554,13 +713,6 @@ function finishScan() {
   downloadButton.disabled = false;
 
   stopButton.style.display = "none";
-
-  renderResults();
-
-  updateSelectedCounter();
-
-  statusText.textContent =
-    "Escaneo terminado.";
 }
 
 
@@ -570,63 +722,67 @@ function finishScan() {
 
 function stopScan() {
 
-  scanStopped = true;
+  stopRequested = true;
 
   statusText.textContent =
-    "Deteniendo escaneo...";
-
-  stopButton.style.display = "none";
+    "Terminando el escaneo...";
 }
 
 
 // =====================================================
-// RENDERIZAR RESULTADOS
+// RENDERIZAR
 // =====================================================
 
 function renderResults() {
 
   resultsContainer.innerHTML = "";
 
+
   groups.forEach(group => {
 
-    const groupElement =
+    const element =
       document.createElement("div");
 
-    groupElement.className =
+
+    element.className =
       "image-group";
 
 
     let html = `
+
       <div class="image-title">
         IMAGEN ${group.number}
       </div>
+
     `;
 
 
     group.versions.forEach(
       (version, index) => {
 
-        const size =
-          formatSize(
-            version.width,
-            version.height
-          );
-
-
         html += `
+
           <label class="version">
 
             <input
               type="checkbox"
+
               data-group="${group.number}"
+
               data-version="${index}"
+
               ${version.checked ? "checked" : ""}
             >
 
             <span>
 
               <strong>
-                ${escapeHtml(size)}
+                ${escapeHtml(
+                  formatSize(
+                    version.width,
+                    version.height
+                  )
+                )}
               </strong>
 
               <br>
@@ -641,20 +797,24 @@ function renderResults() {
             </span>
 
           </label>
+
         `;
       }
     );
 
 
-    groupElement.innerHTML = html;
+    element.innerHTML = html;
+
 
     resultsContainer.appendChild(
-      groupElement
+      element
     );
   });
 
 
-  // Eventos de selección
+  /*
+   * Reasignar eventos.
+   */
 
   resultsContainer
     .querySelectorAll(
@@ -664,7 +824,38 @@ function renderResults() {
 
       checkbox.addEventListener(
         "change",
-        updateSelectedCounter
+        () => {
+
+          /*
+           * Si el usuario marca una versión
+           * diferente dentro del mismo grupo,
+           * desmarcar la anterior.
+           *
+           * Así cada imagen representa
+           * una sola descarga.
+           */
+
+          if (checkbox.checked) {
+
+            const groupNumber =
+              checkbox.dataset.group;
+
+
+            resultsContainer
+              .querySelectorAll(
+                `input[data-group="${groupNumber}"]`
+              )
+              .forEach(other => {
+
+                if (other !== checkbox) {
+                  other.checked = false;
+                }
+              });
+          }
+
+
+          updateSelectedCounter();
+        }
       );
     });
 }
@@ -684,20 +875,12 @@ function getSelectedCount() {
 
 function updateSelectedCounter() {
 
-  const selected =
-    getSelectedCount();
-
   const total =
     groups.length;
 
 
-  if (!total) {
-
-    progressText.textContent =
-      "0 imágenes seleccionadas";
-
-    return;
-  }
+  const selected =
+    getSelectedCount();
 
 
   progressText.textContent =
@@ -720,7 +903,7 @@ async function downloadSelected() {
   if (!checkboxes.length) {
 
     statusText.textContent =
-      "No seleccionaste ninguna imagen.";
+      "No hay imágenes seleccionadas.";
 
     return;
   }
@@ -732,7 +915,9 @@ async function downloadSelected() {
   let count = 0;
 
 
-  for (const checkbox of checkboxes) {
+  for (
+    const checkbox of checkboxes
+  ) {
 
     const groupNumber =
       Number(
@@ -752,14 +937,18 @@ async function downloadSelected() {
       );
 
 
-    if (!group) continue;
+    if (!group) {
+      continue;
+    }
 
 
     const version =
       group.versions[versionIndex];
 
 
-    if (!version?.url) continue;
+    if (!version?.url) {
+      continue;
+    }
 
 
     try {
@@ -778,12 +967,10 @@ async function downloadSelected() {
       statusText.textContent =
         `Descargando ${count} de ${checkboxes.length}...`;
 
-
     } catch (error) {
 
       console.error(
         "Error descargando:",
-        version.url,
         error
       );
     }
